@@ -1,0 +1,21 @@
+flowchart LR
+    subgraph Input
+        I[Image] --> IE[ResNet Encoder]
+        S[Style Token] --> SE[Style Encoder]
+    end
+    
+    subgraph Feature Processing
+        IE --> F[Image Features]
+        SE --> SF[Style Features]
+        F & SF --> FM[Feature Merger]
+    end
+    
+    subgraph Caption Generation
+        FM --> ATT[Attention Module]
+        ATT --> LSTM[LSTM Decoder]
+        LSTM --> V[Vocabulary Distribution]
+    end
+    
+    subgraph Output
+        V --> C[Generated Caption]
+    end
