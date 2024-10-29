@@ -1,0 +1,103 @@
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+from torchvision import models, transforms
+import nltk
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import numpy as np
+
+class StyleAwareImageCaptioner(nn.Module):
+    def __init__(self, vocab_size, embed_size=256, hidden_size=512):
+        super(StyleAwareImageCaptioner, self).__init__()
+        
+        # Image encoder using pretrained ResNet
+        resnet = models.resnet50(pretrained=True)
+        modules = list(resnet.children())[:-1]
+        self.image_encoder = nn.Sequential(*modules)
+        
+        # Style encoder
+        self.style_encoder = nn.Sequential(
+            nn.Linear(1000, 256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, embed_size)
+        )
+        
+        # Caption decoder with attention
+        self.embed = nn.Embedding(vocab_size, embed_size)
+        self.lstm = nn.LSTM(embed_size * 2, hidden_size, batch_first=True)
+        self.attention = nn.MultiheadAttention(hidden_size, 8)
+        self.fc = nn.Linear(hidden_size, vocab_size)
+        
+    def forward(self, images, style_tokens, captions):
+        # Extract image features
+        image_features = self.image_encoder(images)
+        image_features = image_features.view(images.size(0), -1)
+        
+        # Encode style
+        style_embed = self.style_encoder(style_tokens)
+        
+        # Combine image and style features
+        combined_features = torch.cat((image_features, style_embed), dim=1)
+        
+        # Generate captions with attention
+        embeddings = self.embed(captions)
+        hidden, _ = self.lstm(embeddings)
+        attention_out, _ = self.attention(hidden, hidden, hidden)
+        outputs = self.fc(attention_out)
+        
+        return outputs
+    
+class StyleTransferModule(nn.Module):
+    def __init__(self, style_dim=256):
+        super(StyleTransferModule, self).__init__()
+        self.style_mapper = nn.Sequential(
+            nn.Linear(style_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, style_dim)
+        )
+        
+    def forward(self, content, style):
+        style_features = self.style_mapper(style)
+        return content * style_features
+
+def train_model(model, dataloader, criterion, optimizer, num_epochs=10):
+    """
+    Training loop with style-aware caption generation
+    """
+    model.train()
+    for epoch in range(num_epochs):
+        for images, captions, styles in dataloader:
+            # Forward pass
+            outputs = model(images, styles, captions)
+            loss = criterion(outputs.view(-1, outputs.size(-1)), captions.view(-1))
+            
+            # Backward pass
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+def evaluate_captions(model, test_loader, metrics=['BLEU', 'METEOR']):
+    """
+    Evaluate generated captions using standard metrics
+    """
+    model.eval()
+    scores = {metric: [] for metric in metrics}
+    
+    with torch.no_grad():
+        for images, captions, styles in test_loader:
+            generated_captions = model(images, styles, captions)
+            # Calculate metrics
+            # Implementation of metric calculation would go here
+            
+    return scores
+
+def main():
+    # Initialize model and training components
+    model = StyleAwareImageCaptioner(vocab_size=10000)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    
+    # Training and evaluation pipeline
+    train_model(model, train_loader, criterion, optimizer)
+    scores = evaluate_captions(model, test_loader)
